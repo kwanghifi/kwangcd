@@ -7,11 +7,16 @@ export async function identifyModelFromImage(base64Image: string): Promise<strin
   
   try {
     const ai = new GoogleGenAI({ apiKey });
+    // สกัดเฉพาะข้อมูล base64
     const base64Data = base64Image.includes(',') ? base64Image.split(',')[1] : base64Image;
-    const mimeType = base64Image.includes('image/png') ? 'image/png' : 'image/jpeg';
+    
+    // กำหนด MIME Type ให้ตรงกับข้อมูลที่ส่งมา (แนะนำ PNG เพื่อความคมชัดของตัวอักษร)
+    let mimeType = 'image/png';
+    if (base64Image.includes('image/jpeg')) mimeType = 'image/jpeg';
+    if (base64Image.includes('image/webp')) mimeType = 'image/webp';
 
     const response = await ai.models.generateContent({
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-flash-preview-09-2025', // ใช้โมเดลรุ่นใหม่ล่าสุดที่รองรับ Vision ได้ดีเยี่ยม
       contents: {
         parts: [
           {
@@ -21,19 +26,19 @@ export async function identifyModelFromImage(base64Image: string): Promise<strin
             },
           },
           {
-            text: "Identify the CD player model from this image. Look closely at the manufacturer logo (like Sony, Marantz, Denon) and the model code (usually near the display or tray). Return ONLY the brand and model number as a simple string, for example: 'Marantz CD-63'. If you can't see a model clearly, try to guess the most likely one based on visual cues. If completely unknown, return 'UNKNOWN'.",
+            text: "Identify the CD player in this image. Look for the Brand (e.g., Sony, Marantz, Denon, Philips) and the specific Model Number (e.g., CDP-337ESD, CD-63, DCD-1500) printed on the front panel. Return ONLY the identified 'Brand Model' as a short string. If you are not sure, try to read any text that looks like a model number. Return 'NOT_FOUND' only if there is absolutely no readable text.",
           },
         ],
       },
     });
     
     const result = response.text?.trim().replace(/[*"']/g, ''); 
-    if (!result || result.toUpperCase().includes('UNKNOWN') || result.length < 3) {
+    if (!result || result.toUpperCase().includes('NOT_FOUND') || result.length < 3) {
       return null;
     }
     return result;
   } catch (error) {
-    console.error("Gemini Vision Error:", error);
+    console.error("Gemini Vision API Error:", error);
     return null;
   }
 }
@@ -46,9 +51,7 @@ export async function fetchSpecsWithAI(modelName: string): Promise<{ dac: string
     const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: `Search technical specifications for: "${modelName}" Hi-Fi CD Player. I need the DAC chip model and the Laser Pickup / Optical block model. 
-      Return ONLY valid JSON with keys "dac" and "laser". 
-      Example: {"dac": "TDA1541A", "laser": "CDM-4/19"}`,
+      contents: `Find technical specs for Hi-Fi CD Player: "${modelName}". Required: DAC chip and Laser Pickup model. Return valid JSON only. Format: {"dac": "...", "laser": "..."}`,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
