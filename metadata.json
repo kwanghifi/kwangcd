@@ -1,0 +1,8 @@
+{
+  "name": "CD-Player Spec Finder",
+  "description": "A mobile-optimized search tool for CD player models using text, image, and voice recognition powered by Gemini.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
