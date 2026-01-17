@@ -2,8 +2,7 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Search, Camera, Mic, X, RefreshCcw, Loader2, 
-  Image as ImageIcon, Edit2, Trash2, Plus, LogIn, 
-  LogOut, Shield, Save, AlertCircle, Database, CheckCircle2, UploadCloud, CloudOff, Info, Code2, Copy, ExternalLink, Zap, ZapOff, Sparkles, Globe
+  Image as ImageIcon, Database, CheckCircle2, Globe, Sparkles, Zap, ExternalLink, Info, AlertCircle
 } from 'lucide-react';
 import { CDPModel } from './types';
 import { identifyModelFromImage, fetchSpecsWithAI } from './geminiService';
@@ -44,7 +43,6 @@ const App: React.FC = () => {
     fetchAllCloudData();
   }, []);
 
-  // ฟังก์ชันดึงข้อมูลแบบวนลูปจนกว่าจะหมด (Recursive Fetch) เพื่อให้มั่นใจว่าได้ครบถ้วน
   const fetchAllCloudData = async () => {
     setIsLoading(true);
     if (!supabase) {
@@ -71,19 +69,12 @@ const App: React.FC = () => {
         if (data && data.length > 0) {
           const mapped = data.map(r => ({ ...r, source: 'cloud' as const }));
           allResults = [...allResults, ...mapped];
-          
-          // ถ้าได้ข้อมูลมาน้อยกว่า 1000 แสดงว่าหมดแล้ว
-          if (data.length < 1000) {
-            hasMore = false;
-          } else {
-            from += 1000;
-            to += 1000;
-          }
+          if (data.length < 1000) hasMore = false;
+          else { from += 1000; to += 1000; }
         } else {
           hasMore = false;
         }
       }
-
       setCloudData(allResults);
     } catch (err) {
       console.error("Fetch Error:", err);
@@ -99,20 +90,25 @@ const App: React.FC = () => {
   };
 
   const combinedData = useMemo(() => {
-    // รวมข้อมูล Cloud และ AI เข้าด้วยกัน
     const all = [...cloudData, ...sessionAiData];
-    // จัดเรียงตามชื่อรุ่น
     return all.sort((a, b) => a.model.localeCompare(b.model));
   }, [cloudData, sessionAiData]);
 
   const filteredResults = useMemo(() => {
     if (!searchTerm.trim()) return combinedData;
     const normalizedSearch = normalizeForSearch(searchTerm);
-    return combinedData.filter(item => 
-      normalizeForSearch(item.model).includes(normalizedSearch) ||
-      normalizeForSearch(item.dac || '').includes(normalizedSearch) ||
-      normalizeForSearch(item.laser || '').includes(normalizedSearch)
-    );
+    
+    return combinedData.filter(item => {
+      const normalizedModel = normalizeForSearch(item.model);
+      const normalizedDac = normalizeForSearch(item.dac || '');
+      const normalizedLaser = normalizeForSearch(item.laser || '');
+      
+      // รองรับการค้นหาแบบสลับฝั่ง (เช่น AI เจอชื่อยาว แต่ใน DB มีชื่อสั้น หรือในทางกลับกัน)
+      return normalizedModel.includes(normalizedSearch) || 
+             normalizedSearch.includes(normalizedModel) ||
+             normalizedDac.includes(normalizedSearch) ||
+             normalizedLaser.includes(normalizedSearch);
+    });
   }, [searchTerm, combinedData]);
 
   const handleAISearch = async () => {
@@ -166,25 +162,33 @@ const App: React.FC = () => {
         setSearchTerm(detected);
         showToast(`AI พบรุ่น: ${detected}`, 'success');
       } else {
-        showToast("ไม่สามารถอ่านชื่อรุ่นได้", "error");
+        showToast("ไม่สามารถอ่านชื่อรุ่นได้ชัดเจน", "error");
       }
-    } catch (err) { showToast("AI ผิดพลาด", "error"); } finally { setIsProcessingImage(false); }
+    } catch (err) { 
+      showToast("AI ผิดพลาด", "error"); 
+    } finally { 
+      setIsProcessingImage(false); 
+    }
   };
 
   const captureImage = async () => {
     if (!videoRef.current || !canvasRef.current) return;
     const canvas = canvasRef.current;
-    canvas.width = videoRef.current.videoWidth;
-    canvas.height = videoRef.current.videoHeight;
-    canvas.getContext('2d')?.drawImage(videoRef.current, 0, 0);
+    const video = videoRef.current;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext('2d')?.drawImage(video, 0, 0);
+    const imageData = canvas.toDataURL('image/jpeg', 0.8);
     closeCamera();
-    await processImage(canvas.toDataURL('image/jpeg'));
+    await processImage(imageData);
   };
 
   const openCamera = async () => {
     setIsCameraActive(true);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } 
+      });
       if (videoRef.current) videoRef.current.srcObject = stream;
     } catch (err) { 
       setIsCameraActive(false); 
@@ -204,7 +208,7 @@ const App: React.FC = () => {
       {toast && (
         <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-[100] px-6 py-4 rounded-3xl shadow-2xl flex items-center gap-3 animate-in slide-in-from-top duration-300 w-[90%] border-l-8 ${toast.type === 'success' ? 'bg-white text-emerald-800 border-emerald-500' : 'bg-white text-rose-800 border-rose-500'}`}>
           {toast.type === 'success' ? <CheckCircle2 className="w-6 h-6 text-emerald-500 shrink-0" /> : <AlertCircle className="w-6 h-6 text-rose-500 shrink-0" />}
-          <span className="text-sm font-black">{toast.msg}</span>
+          <span className="text-sm font-black italic">{toast.msg}</span>
         </div>
       )}
 
@@ -222,23 +226,21 @@ const App: React.FC = () => {
           </button>
         </div>
         <div className="flex items-center justify-between">
-          <div className="flex gap-3">
-            <div className="bg-blue-500/10 px-4 py-2 rounded-2xl border border-blue-500/20">
-              <p className="text-[10px] text-blue-300 uppercase tracking-widest font-black flex items-center gap-2">
-                <Globe className="w-3.5 h-3.5" /> 
-                {isLoading ? 'SYNCING...' : `${cloudData.length} MODELS READY`}
-              </p>
-            </div>
+          <div className="bg-blue-500/10 px-4 py-2 rounded-2xl border border-blue-500/20">
+            <p className="text-[10px] text-blue-300 uppercase tracking-widest font-black flex items-center gap-2">
+              <Globe className="w-3.5 h-3.5" /> 
+              {isLoading ? 'SYNCING...' : `${cloudData.length} MODELS READY`}
+            </p>
           </div>
           <div className={`px-3 py-2 rounded-2xl flex items-center gap-2 border ${aiStatus === 'ready' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-rose-500/10 border-rose-500/20 text-rose-400'}`}>
             <Zap className={`w-3.5 h-3.5 ${aiStatus === 'ready' ? 'animate-pulse' : ''}`} />
-            <span className="text-[10px] font-black uppercase">{aiStatus === 'ready' ? 'GEMINI ON' : 'AI OFF'}</span>
+            <span className="text-[10px] font-black uppercase tracking-tighter">{aiStatus === 'ready' ? 'GEMINI ON' : 'AI OFF'}</span>
           </div>
         </div>
       </header>
 
-      <div className="p-4 bg-white/90 backdrop-blur-xl sticky top-[138px] z-30 shadow-md border-b space-y-4">
-        <div className="relative">
+      <div className="p-4 bg-white/95 backdrop-blur-xl sticky top-[138px] z-30 shadow-md border-b space-y-4">
+        <div className="relative group">
           <input 
             type="text"
             placeholder="ค้นหาชื่อรุ่น / ชิป / หัวอ่าน..."
@@ -246,9 +248,9 @@ const App: React.FC = () => {
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
-          <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400 w-6 h-6" />
+          <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-400 w-6 h-6 transition-colors group-focus-within:text-blue-500" />
           {searchTerm && (
-            <button onClick={() => setSearchTerm('')} className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-400 bg-slate-200 rounded-full p-1">
+            <button onClick={() => setSearchTerm('')} className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-400 bg-slate-200 rounded-full p-1 active:scale-90">
               <X className="w-4 h-4" />
             </button>
           )}
@@ -273,25 +275,27 @@ const App: React.FC = () => {
       <main className="flex-1 p-5 space-y-5">
         {isLoading && cloudData.length === 0 && (
           <div className="py-24 text-center space-y-6">
-            <div className="relative w-20 h-20 mx-auto">
-              <div className="absolute inset-0 border-4 border-blue-500/20 rounded-full animate-ping"></div>
-              <Loader2 className="w-20 h-20 animate-spin text-blue-500" />
-              <Database className="w-8 h-8 text-blue-600 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
-            </div>
+            <Loader2 className="w-20 h-20 animate-spin text-blue-500 mx-auto" />
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-[0.2em] italic">กำลังเชื่อมต่อฐานข้อมูลระบบคลาวด์...</p>
+          </div>
+        )}
+
+        {isProcessingImage && (
+          <div className="bg-indigo-600 p-12 rounded-[3rem] text-center text-white space-y-5 animate-pulse shadow-2xl border-4 border-white/20">
+            <Camera className="w-16 h-16 mx-auto animate-bounce text-indigo-200" />
             <div className="space-y-2">
-              <p className="text-sm font-black uppercase tracking-[0.2em] text-slate-900 italic">Syncing Cloud Database</p>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">กรุณารอสักครู่ กำลังดึงข้อมูลทั้งหมด...</p>
+              <p className="font-black text-xl uppercase tracking-widest italic">AI Vision Scanning...</p>
+              <p className="text-[10px] text-indigo-200 font-bold uppercase tracking-wider">กำลังระบุชื่อรุ่นจากรูปภาพ</p>
             </div>
           </div>
         )}
 
-        {(isSearchingAI || isProcessingImage) && (
-          <div className="bg-indigo-600 p-12 rounded-[3rem] text-center text-white space-y-5 animate-pulse shadow-2xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 p-4 opacity-20"><Sparkles className="w-20 h-20" /></div>
-            <Sparkles className="w-16 h-16 mx-auto animate-bounce text-indigo-200" />
+        {isSearchingAI && (
+          <div className="bg-purple-600 p-12 rounded-[3rem] text-center text-white space-y-5 animate-pulse shadow-2xl border-4 border-white/20">
+            <Sparkles className="w-16 h-16 mx-auto animate-bounce text-purple-200" />
             <div className="space-y-2">
-              <p className="font-black text-xl uppercase tracking-widest italic">Gemini AI Active</p>
-              <p className="text-xs text-indigo-200 font-bold uppercase tracking-wider">กำลังวิเคราะห์สเปกให้คุณ...</p>
+              <p className="font-black text-xl uppercase tracking-widest italic">Gemini Specs Search...</p>
+              <p className="text-[10px] text-purple-200 font-bold uppercase tracking-wider">กำลังค้นหาสเปกเทคนิคเชิงลึก</p>
             </div>
           </div>
         )}
@@ -302,53 +306,41 @@ const App: React.FC = () => {
               <div className="mb-6 flex justify-between items-start">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-3 flex-wrap">
-                    {item.source === 'ai' && (
-                      <span className="text-[9px] font-black text-purple-600 uppercase tracking-[0.1em] bg-purple-100 px-3 py-1.5 rounded-xl flex items-center gap-2 border border-purple-200 shadow-sm">
-                        <Sparkles className="w-3.5 h-3.5" /> AI DATA
-                      </span>
-                    )}
-                    {item.source === 'cloud' && (
-                      <span className="text-[9px] font-black text-emerald-600 uppercase tracking-[0.1em] bg-emerald-100 px-3 py-1.5 rounded-xl flex items-center gap-2 border border-emerald-200 shadow-sm">
-                        <Globe className="w-3.5 h-3.5" /> DATABASE
-                      </span>
-                    )}
+                    <span className={`text-[9px] font-black uppercase tracking-[0.1em] px-3 py-1.5 rounded-xl flex items-center gap-2 border shadow-sm ${item.source === 'ai' ? 'text-purple-600 bg-purple-100 border-purple-200' : 'text-emerald-600 bg-emerald-100 border-emerald-200'}`}>
+                      {item.source === 'ai' ? <Sparkles className="w-3.5 h-3.5" /> : <Globe className="w-3.5 h-3.5" />}
+                      {item.source === 'ai' ? 'AI DATA' : 'DATABASE'}
+                    </span>
                   </div>
                   <h3 className="font-black text-slate-900 text-2xl italic leading-[1.2] break-words pr-4 tracking-tighter">
                     {item.model}
                   </h3>
                 </div>
-                <div className="p-4 bg-slate-50 rounded-[1.5rem] shadow-inner">
-                   <ExternalLink className="w-5 h-5 text-slate-300" />
+                <div className="p-4 bg-slate-50 rounded-[1.5rem] shadow-inner text-slate-200 group-hover:text-blue-500 transition-colors">
+                   <ExternalLink className="w-5 h-5" />
                 </div>
               </div>
               
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 group transition-all hover:bg-white hover:shadow-md">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-[10px] uppercase font-black text-slate-400 tracking-widest flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full bg-blue-500"></div> DAC CHIP
-                    </p>
-                    <div className="opacity-0 group-hover:opacity-100 transition-opacity"><Info className="w-3 h-3 text-blue-300" /></div>
-                  </div>
+                  <p className="text-[10px] uppercase font-black text-slate-400 tracking-widest flex items-center gap-2 mb-2">
+                    <div className="w-2 h-2 rounded-full bg-blue-500"></div> DAC CHIP
+                  </p>
                   <p className="text-base font-black text-slate-800 leading-snug break-words">{item.dac || '-'}</p>
                 </div>
                 
                 <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 group transition-all hover:bg-white hover:shadow-md">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-[10px] uppercase font-black text-slate-400 tracking-widest flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full bg-indigo-500"></div> OPTICAL UNIT
-                    </p>
-                    <div className="opacity-0 group-hover:opacity-100 transition-opacity"><Info className="w-3 h-3 text-indigo-300" /></div>
-                  </div>
+                  <p className="text-[10px] uppercase font-black text-slate-400 tracking-widest flex items-center gap-2 mb-2">
+                    <div className="w-2 h-2 rounded-full bg-indigo-500"></div> OPTICAL UNIT
+                  </p>
                   <p className="text-base font-black text-slate-800 leading-snug break-words">{item.laser || '-'}</p>
                 </div>
               </div>
             </div>
           ))
-        ) : !isLoading && !isSearchingAI && (
+        ) : !isLoading && !isSearchingAI && !isProcessingImage && (
           <div className="py-24 text-center space-y-10">
             <div className="relative w-40 h-40 mx-auto">
-              <div className="absolute inset-0 bg-white rounded-[3rem] shadow-xl rotate-12 border border-slate-100"></div>
+              <div className="absolute inset-0 bg-white rounded-[3rem] shadow-xl rotate-12 border border-slate-100 opacity-50"></div>
               <div className="absolute inset-0 bg-white rounded-[3rem] shadow-xl -rotate-6 flex items-center justify-center border-4 border-slate-50">
                  <Search className="w-16 h-16 text-slate-200" />
               </div>
@@ -357,10 +349,9 @@ const App: React.FC = () => {
               <div className="space-y-2">
                 <p className="text-lg font-black uppercase tracking-tighter text-slate-900 italic">No Exact Match Found</p>
                 <p className="text-[11px] text-slate-400 font-bold uppercase tracking-widest max-w-[80%] mx-auto leading-relaxed">
-                  ไม่พบสเปกของ "{searchTerm}" ในฐานข้อมูลระบบคลาวด์ของคุณ
+                  ไม่พบรุ่น "{searchTerm || '...'}" ในฐานข้อมูลระบบคลาวด์
                 </p>
               </div>
-              
               {searchTerm && aiStatus === 'ready' && (
                 <button 
                   onClick={handleAISearch}
@@ -375,13 +366,13 @@ const App: React.FC = () => {
       </main>
 
       {isCameraActive && (
-        <div className="fixed inset-0 z-50 bg-black flex flex-col">
+        <div className="fixed inset-0 z-50 bg-black flex flex-col animate-in fade-in duration-300">
           <div className="p-8 flex justify-between items-center text-white absolute top-0 w-full z-10">
             <div className="flex items-center gap-3">
               <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.8)]"></div>
-              <span className="font-black text-[11px] tracking-widest uppercase bg-black/40 px-4 py-2 rounded-full backdrop-blur-md border border-white/20 shadow-lg">AI VISION SCANNER</span>
+              <span className="font-black text-[11px] tracking-widest uppercase bg-black/40 px-4 py-2 rounded-full backdrop-blur-md border border-white/20 shadow-lg italic">AI VISION SCANNER</span>
             </div>
-            <button onClick={closeCamera} className="bg-white/10 p-4 rounded-full backdrop-blur-xl border border-white/30 active:scale-90 transition-all shadow-2xl">
+            <button onClick={closeCamera} className="bg-white/10 p-4 rounded-full backdrop-blur-xl border border-white/30 active:scale-90 transition-all">
               <X className="w-7 h-7" />
             </button>
           </div>
@@ -389,38 +380,33 @@ const App: React.FC = () => {
           <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
           
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-10">
-            <div className="w-full aspect-[16/10] border-2 border-blue-400 rounded-[3rem] animate-pulse shadow-[0_0_200px_rgba(59,130,246,0.5)] relative">
-               <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-blue-500 text-[10px] font-black px-6 py-2 rounded-full text-white uppercase tracking-wider shadow-lg">Place Model Name Inside</div>
-               <div className="absolute -top-1 -left-1 w-8 h-8 border-t-4 border-l-4 border-blue-400 rounded-tl-xl"></div>
-               <div className="absolute -top-1 -right-1 w-8 h-8 border-t-4 border-r-4 border-blue-400 rounded-tr-xl"></div>
-               <div className="absolute -bottom-1 -left-1 w-8 h-8 border-b-4 border-l-4 border-blue-400 rounded-bl-xl"></div>
-               <div className="absolute -bottom-1 -right-1 w-8 h-8 border-b-4 border-r-4 border-blue-400 rounded-br-xl"></div>
+            <div className="w-full aspect-[16/10] border-2 border-blue-400 rounded-[3rem] animate-pulse shadow-[0_0_200px_rgba(59,130,246,0.3)] relative">
+               <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-blue-500 text-[10px] font-black px-6 py-2 rounded-full text-white uppercase tracking-wider shadow-lg">Focus on Model Name</div>
+               <div className="absolute -top-1 -left-1 w-10 h-10 border-t-4 border-l-4 border-blue-400 rounded-tl-2xl"></div>
+               <div className="absolute -top-1 -right-1 w-10 h-10 border-t-4 border-r-4 border-blue-400 rounded-tr-2xl"></div>
+               <div className="absolute -bottom-1 -left-1 w-10 h-10 border-b-4 border-l-4 border-blue-400 rounded-bl-2xl"></div>
+               <div className="absolute -bottom-1 -right-1 w-10 h-10 border-b-4 border-r-4 border-blue-400 rounded-br-2xl"></div>
             </div>
           </div>
           
           <div className="absolute bottom-16 w-full flex justify-center items-center">
-            <button onClick={captureImage} className="w-28 h-28 rounded-full border-[8px] border-white bg-white/30 active:scale-90 transition-all shadow-2xl flex items-center justify-center group relative">
-               <div className="w-20 h-20 bg-white rounded-full group-active:scale-95 transition-transform shadow-inner"></div>
-               <Camera className="w-8 h-8 text-slate-800 absolute opacity-50" />
+            <button onClick={captureImage} className="w-28 h-28 rounded-full border-[8px] border-white bg-white/30 active:scale-90 transition-all shadow-2xl flex items-center justify-center group">
+               <div className="w-20 h-20 bg-white rounded-full group-active:scale-95 transition-transform shadow-inner flex items-center justify-center">
+                  <Camera className="w-8 h-8 text-slate-900" />
+               </div>
             </button>
           </div>
         </div>
       )}
 
-      <input 
-        type="file" 
-        ref={fileInputRef} 
-        className="hidden" 
-        accept="image/*" 
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) {
-            const r = new FileReader();
-            r.onload = (ev) => processImage(ev.target?.result as string);
-            r.readAsDataURL(file);
-          }
-        }} 
-      />
+      <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={(e) => {
+        const file = e.target.files?.[0];
+        if (file) {
+          const r = new FileReader();
+          r.onload = (ev) => processImage(ev.target?.result as string);
+          r.readAsDataURL(file);
+        }
+      }} />
       <canvas ref={canvasRef} className="hidden" />
     </div>
   );
