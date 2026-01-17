@@ -45,7 +45,7 @@ const App: React.FC = () => {
     setIsLoading(true);
     if (!supabase) {
       setIsLoading(false);
-      showToast("Connection to cloud failed", "error");
+      showToast("Cloud Connection Failed", "error");
       return;
     }
     try {
@@ -67,24 +67,30 @@ const App: React.FC = () => {
       }
       setCloudData(allResults);
     } catch (err) {
-      showToast("Error loading database", "error");
+      showToast("Database Sync Error", "error");
     } finally {
       setIsLoading(false);
     }
   };
 
-  const cleanStr = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const normalize = (str: string) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
 
   const combinedData = useMemo(() => {
     const all = [...cloudData, ...sessionAiData];
-    return all.sort((a, b) => a.model.localeCompare(b.model));
+    // ลบตัวซ้ำ
+    const unique = all.reduce((acc: CDPDbModel[], current) => {
+      const x = acc.find(item => normalize(item.model) === normalize(current.model));
+      if (!x) return acc.concat([current]);
+      return acc;
+    }, []);
+    return unique.sort((a, b) => a.model.localeCompare(b.model));
   }, [cloudData, sessionAiData]);
 
   const filteredResults = useMemo(() => {
     if (!searchTerm.trim()) return combinedData;
-    const term = cleanStr(searchTerm);
+    const term = normalize(searchTerm);
     return combinedData.filter(item => {
-      const model = cleanStr(item.model);
+      const model = normalize(item.model);
       return model.includes(term) || term.includes(model);
     });
   }, [searchTerm, combinedData]);
@@ -104,8 +110,10 @@ const App: React.FC = () => {
         };
         setSessionAiData(prev => [newResult, ...prev]);
         setSearchTerm(modelToSearch);
-        showToast(`AI: Specs found for ${modelToSearch}`, "success");
-      } else showToast("AI could not find specs", "error");
+        showToast(`AI Found Specs for ${modelToSearch}`, "success");
+      } else {
+        showToast("AI could not find exact specs", "error");
+      }
     } catch (err) {
       showToast("AI Search Error", "error");
     } finally {
@@ -119,19 +127,22 @@ const App: React.FC = () => {
       const detected = await identifyModelFromImage(data);
       if (detected) {
         setSearchTerm(detected);
-        showToast(`Found: ${detected}`, 'success');
         
-        // ตรวจสอบว่ามีในฐานข้อมูลไหม ถ้าไม่มีให้ AI หาเพิ่มให้เลย
-        const term = cleanStr(detected);
-        const hasExact = cloudData.some(m => cleanStr(m.model) === term);
-        if (!hasExact && aiStatus === 'ready') {
+        // เช็คว่ามีใน DB ไหม
+        const term = normalize(detected);
+        const exists = cloudData.some(m => normalize(m.model).includes(term) || term.includes(normalize(m.model)));
+        
+        if (!exists && aiStatus === 'ready') {
+          showToast(`Detected: ${detected}. Fetching specs...`, 'success');
           await handleAISearch(detected);
+        } else {
+          showToast(`Identified: ${detected}`, 'success');
         }
       } else {
-        showToast("ไม่พบรุ่นในรูปภาพ (ลองเล็งให้ชัดกว่าเดิม)", "error");
+        showToast("ไม่พบรุ่นในรูปภาพ (ลองเล็งให้ชัดกว่านี้)", "error");
       }
     } catch (err) { 
-      showToast("Vision process failed", "error"); 
+      showToast("Vision Process Error", "error"); 
     } finally { 
       setIsProcessingImage(false); 
     }
@@ -142,7 +153,7 @@ const App: React.FC = () => {
     const canvas = canvasRef.current;
     const video = videoRef.current;
     
-    // ใช้ความละเอียดสูงสุดของ Video Stream
+    // ตั้งค่าความละเอียดสูง
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     const ctx = canvas.getContext('2d');
@@ -150,9 +161,7 @@ const App: React.FC = () => {
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(video, 0, 0);
-      
-      // ใช้ PNG เพื่อรักษาความคมชัดของตัวหนังสือ (OCR ดีกว่า JPEG)
-      const imageData = canvas.toDataURL('image/png');
+      const imageData = canvas.toDataURL('image/png'); // PNG เพื่อ OCR ที่แม่นยำกว่า
       closeCamera();
       await processImage(imageData);
     }
@@ -164,14 +173,14 @@ const App: React.FC = () => {
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: { 
           facingMode: 'environment', 
-          width: { ideal: 4096 }, // ขอความละเอียดสูงสุดที่กล้องทำได้
+          width: { ideal: 4096 },
           height: { ideal: 2160 } 
         } 
       });
       if (videoRef.current) videoRef.current.srcObject = stream;
     } catch (err) { 
       setIsCameraActive(false); 
-      showToast("กล้องขัดข้อง", "error"); 
+      showToast("Camera access denied", "error"); 
     }
   };
 
@@ -183,23 +192,25 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col max-w-md mx-auto bg-slate-50 shadow-2xl relative font-sans pb-24 overflow-x-hidden">
+    <div className="min-h-screen flex flex-col max-w-md mx-auto bg-[#f8fafc] shadow-2xl relative font-sans pb-24 overflow-x-hidden">
+      {/* Toast */}
       {toast && (
-        <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-[100] px-6 py-4 rounded-3xl shadow-2xl flex items-center gap-3 animate-in slide-in-from-top duration-300 w-[90%] border-l-8 ${toast.type === 'success' ? 'bg-white text-emerald-800 border-emerald-500' : 'bg-white text-rose-800 border-rose-500'}`}>
+        <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-[100] px-6 py-4 rounded-3xl shadow-2xl flex items-center gap-3 animate-in slide-in-from-top duration-300 w-[90%] border-l-[6px] ${toast.type === 'success' ? 'bg-white text-emerald-800 border-emerald-500' : 'bg-white text-rose-800 border-rose-500'}`}>
           {toast.type === 'success' ? <CheckCircle2 className="w-6 h-6 text-emerald-500 shrink-0" /> : <AlertCircle className="w-6 h-6 text-rose-500 shrink-0" />}
-          <span className="text-sm font-black">{toast.msg}</span>
+          <span className="text-sm font-black italic">{toast.msg}</span>
         </div>
       )}
 
-      <header className="bg-[#0f172a] text-white p-6 sticky top-0 z-40 shadow-xl border-b border-white/5">
+      {/* Header */}
+      <header className="bg-[#0f172a] text-white p-6 sticky top-0 z-40 shadow-2xl border-b border-white/5">
         <div className="flex justify-between items-center mb-5">
           <div className="flex items-center gap-3">
-            <div className="bg-blue-600 p-2.5 rounded-2xl shadow-lg shadow-blue-500/20">
+            <div className="bg-blue-600 p-2.5 rounded-2xl shadow-lg shadow-blue-500/30">
               <Database className="w-6 h-6 text-white" />
             </div>
             <h1 className="text-2xl font-black italic tracking-tighter text-blue-400">CD FINDER</h1>
           </div>
-          <button onClick={fetchAllCloudData} className="p-3 bg-white/5 rounded-2xl hover:bg-white/10 active:scale-90 transition-all border border-white/10">
+          <button onClick={fetchAllCloudData} className="p-3 bg-white/5 rounded-2xl hover:bg-white/10 border border-white/10 transition-all active:scale-90">
             <RefreshCcw className={`w-5 h-5 ${isLoading ? 'animate-spin' : ''}`} />
           </button>
         </div>
@@ -212,53 +223,55 @@ const App: React.FC = () => {
           </div>
           <div className={`px-4 py-2 rounded-2xl flex items-center gap-2 border shadow-sm ${aiStatus === 'ready' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' : 'bg-rose-500/10 border-rose-500/20 text-rose-400'}`}>
             <Zap className={`w-3.5 h-3.5 ${aiStatus === 'ready' ? 'animate-pulse' : ''}`} />
-            <span className="text-[10px] font-black uppercase tracking-tighter">{aiStatus === 'ready' ? 'GEMINI ACTIVE' : 'AI ERROR'}</span>
+            <span className="text-[10px] font-black uppercase tracking-tighter">{aiStatus === 'ready' ? 'GEMINI 3 ON' : 'AI ERROR'}</span>
           </div>
         </div>
       </header>
 
+      {/* Search Bar & Actions */}
       <div className="p-4 bg-white/95 backdrop-blur-xl sticky top-[146px] z-30 shadow-md border-b space-y-4">
-        <div className="relative group">
+        <div className="relative">
           <input 
             type="text"
-            placeholder="Search brand, model, dac..."
+            placeholder="Search model, DAC, etc..."
             className="w-full pl-14 pr-12 py-5 bg-slate-100 rounded-[2.2rem] border-2 border-transparent focus:border-blue-500 focus:bg-white outline-none font-black text-slate-800 transition-all shadow-inner text-lg placeholder:text-slate-300"
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
           />
-          <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-300 w-6 h-6 transition-colors group-focus-within:text-blue-500" />
+          <Search className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-300 w-6 h-6" />
           {searchTerm && <button onClick={() => setSearchTerm('')} className="absolute right-5 top-1/2 -translate-y-1/2 text-slate-400 bg-slate-200 rounded-full p-1"><X className="w-4 h-4" /></button>}
         </div>
 
         <div className="grid grid-cols-3 gap-3">
-          <button onClick={openCamera} className="flex flex-col items-center justify-center gap-2 py-5 bg-[#2563eb] text-white rounded-[2rem] active:scale-95 shadow-xl shadow-blue-200 transition-all">
-            <Camera className="w-7 h-7" /><span className="text-[10px] font-black uppercase tracking-tighter">Scan Panel</span>
+          <button onClick={openCamera} className="flex flex-col items-center justify-center gap-2 py-5 bg-[#2563eb] text-white rounded-[2rem] active:scale-95 shadow-xl shadow-blue-200 transition-all border-b-4 border-blue-800">
+            <Camera className="w-7 h-7" /><span className="text-[10px] font-black uppercase tracking-tighter">AI Scan</span>
           </button>
           <button onClick={() => fileInputRef.current?.click()} className="flex flex-col items-center justify-center gap-2 py-5 bg-white text-slate-600 rounded-[2rem] border-2 border-slate-100 shadow-sm transition-all active:scale-95"><ImageIcon className="w-7 h-7" /><span className="text-[10px] font-black uppercase tracking-tighter">Gallery</span></button>
-          <button onClick={() => showToast("Voice search is loading", "success")} className="flex flex-col items-center justify-center gap-2 py-5 bg-white text-slate-600 rounded-[2rem] border-2 border-slate-100 shadow-sm active:scale-95"><Mic className="w-7 h-7" /><span className="text-[10px] font-black uppercase tracking-tighter">Voice</span></button>
+          <button onClick={() => showToast("Microphone feature active", "success")} className="flex flex-col items-center justify-center gap-2 py-5 bg-white text-slate-600 rounded-[2rem] border-2 border-slate-100 shadow-sm transition-all active:scale-95"><Mic className="w-7 h-7" /><span className="text-[10px] font-black uppercase tracking-tighter">Voice</span></button>
         </div>
       </div>
 
+      {/* Main Results */}
       <main className="flex-1 p-5 space-y-5">
         {(isProcessingImage || isSearchingAI) && (
-          <div className="bg-[#1e293b] p-12 rounded-[3rem] text-center text-white space-y-5 animate-pulse shadow-2xl border-4 border-blue-500/20">
+          <div className="bg-[#1e293b] p-12 rounded-[3.5rem] text-center text-white space-y-5 animate-pulse shadow-2xl border-4 border-blue-500/20">
             {isProcessingImage ? <Camera className="w-16 h-16 mx-auto animate-bounce text-blue-400" /> : <Sparkles className="w-16 h-16 mx-auto animate-bounce text-purple-400" />}
             <div className="space-y-2">
-              <p className="font-black text-xl uppercase tracking-widest italic">{isProcessingImage ? 'AI VISION' : 'AI FETCHING'}</p>
-              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">กำลังวิเคราะห์ข้อมูลเชิงลึก...</p>
+              <p className="font-black text-xl uppercase tracking-widest italic">{isProcessingImage ? 'Analyzing Image' : 'Gemini Thinking'}</p>
+              <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">กำลังวิเคราะห์สเปกอย่างละเอียด...</p>
             </div>
           </div>
         )}
 
         {!isLoading && filteredResults.length > 0 ? (
           filteredResults.map((item, idx) => (
-            <div key={item.id || `${item.model}-${idx}`} className="bg-white border-2 border-slate-100 rounded-[2.8rem] p-8 shadow-sm hover:shadow-xl transition-all animate-in fade-in zoom-in-95 duration-300 mb-4">
-              <div className="mb-7 flex justify-between items-start">
+            <div key={item.id || `${item.model}-${idx}`} className="bg-white border-2 border-slate-100 rounded-[3rem] p-8 shadow-sm hover:shadow-xl transition-all animate-in fade-in zoom-in-95 duration-300 mb-6">
+              <div className="mb-8 flex justify-between items-start">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-3">
                     <span className={`text-[9px] font-black uppercase tracking-widest px-4 py-1.5 rounded-xl border shadow-sm flex items-center gap-2 ${item.source === 'ai' ? 'text-purple-600 bg-purple-50 border-purple-200' : 'text-emerald-600 bg-emerald-50 border-emerald-200'}`}>
                       {item.source === 'ai' ? <Sparkles className="w-3.5 h-3.5" /> : <Globe className="w-3.5 h-3.5" />}
-                      {item.source === 'ai' ? 'AI DATA' : 'CLOUD DATABASE'}
+                      {item.source === 'ai' ? 'AI GENERATED' : 'CLOUD DATA'}
                     </span>
                   </div>
                   <h3 className="font-black text-slate-900 text-3xl italic leading-tight break-words pr-4 tracking-tighter uppercase">{item.model}</h3>
@@ -267,29 +280,33 @@ const App: React.FC = () => {
                    <ExternalLink className="w-6 h-6" />
                 </div>
               </div>
-              <div className="grid grid-cols-1 gap-4">
-                <div className="bg-slate-50 p-7 rounded-[2.2rem] border border-slate-100 transition-all hover:bg-white hover:shadow-md">
-                  <p className="text-[10px] uppercase font-black text-slate-400 tracking-widest flex items-center gap-3 mb-3"><div className="w-2 h-2 rounded-full bg-blue-500"></div> DAC CHIP</p>
+              <div className="grid grid-cols-1 gap-5">
+                <div className="bg-slate-50 p-8 rounded-[2.5rem] border border-slate-100 transition-all hover:bg-white hover:shadow-lg group">
+                  <p className="text-[10px] uppercase font-black text-slate-400 tracking-widest flex items-center gap-3 mb-3">
+                    <div className="w-2.5 h-2.5 rounded-full bg-blue-500 group-hover:scale-125 transition-transform"></div> DAC CHIP
+                  </p>
                   <p className="text-lg font-black text-slate-800 break-words leading-tight">{item.dac || '-'}</p>
                 </div>
-                <div className="bg-slate-50 p-7 rounded-[2.2rem] border border-slate-100 transition-all hover:bg-white hover:shadow-md">
-                  <p className="text-[10px] uppercase font-black text-slate-400 tracking-widest flex items-center gap-3 mb-3"><div className="w-2 h-2 rounded-full bg-indigo-500"></div> OPTICAL UNIT</p>
+                <div className="bg-slate-50 p-8 rounded-[2.5rem] border border-slate-100 transition-all hover:bg-white hover:shadow-lg group">
+                  <p className="text-[10px] uppercase font-black text-slate-400 tracking-widest flex items-center gap-3 mb-3">
+                    <div className="w-2.5 h-2.5 rounded-full bg-indigo-500 group-hover:scale-125 transition-transform"></div> OPTICAL UNIT
+                  </p>
                   <p className="text-lg font-black text-slate-800 break-words leading-tight">{item.laser || '-'}</p>
                 </div>
               </div>
             </div>
           ))
         ) : !isLoading && !isProcessingImage && !isSearchingAI && (
-          <div className="py-24 text-center space-y-10">
-            <div className="w-40 h-40 bg-slate-100 rounded-[4rem] mx-auto flex items-center justify-center border-8 border-white shadow-2xl rotate-3">
+          <div className="py-24 text-center space-y-12">
+            <div className="w-44 h-44 bg-slate-100 rounded-[5rem] mx-auto flex items-center justify-center border-[10px] border-white shadow-2xl rotate-6">
                <Search className="w-16 h-16 text-slate-200" />
             </div>
             <div className="space-y-6 px-10">
-               <p className="text-2xl font-black uppercase tracking-tighter text-slate-900 italic">No Results</p>
-               <p className="text-xs text-slate-400 font-bold uppercase tracking-widest leading-relaxed">"{searchTerm || 'Model'}" was not found in database.</p>
+               <p className="text-2xl font-black uppercase tracking-tighter text-slate-900 italic">No Database Entry</p>
+               <p className="text-xs text-slate-400 font-bold uppercase tracking-widest leading-relaxed">"{searchTerm || 'Unknown'}" was not found in our current library.</p>
                {searchTerm && aiStatus === 'ready' && (
-                 <button onClick={() => handleAISearch(searchTerm)} className="w-full py-6 bg-indigo-600 text-white rounded-[2.5rem] font-black text-sm uppercase tracking-widest shadow-2xl active:scale-95 transition-all flex items-center justify-center gap-4">
-                   <Sparkles className="w-7 h-7" /> Force AI Spec Search
+                 <button onClick={() => handleAISearch(searchTerm)} className="w-full py-6 bg-indigo-600 text-white rounded-[2.5rem] font-black text-sm uppercase tracking-widest shadow-2xl active:scale-95 transition-all flex items-center justify-center gap-4 border-b-4 border-indigo-900">
+                   <Sparkles className="w-7 h-7" /> Research with Gemini AI
                  </button>
                )}
             </div>
@@ -297,33 +314,39 @@ const App: React.FC = () => {
         )}
       </main>
 
+      {/* Camera Fullscreen UI */}
       {isCameraActive && (
-        <div className="fixed inset-0 z-50 bg-black flex flex-col">
-          <div className="p-8 flex justify-between items-center text-white absolute top-0 w-full z-10">
-            <div className="flex items-center gap-3 bg-black/40 px-5 py-2 rounded-full backdrop-blur-md border border-white/20">
-               <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse"></div>
-               <span className="font-black text-[11px] tracking-widest uppercase italic">OCR Scanner Active</span>
+        <div className="fixed inset-0 z-50 bg-black flex flex-col animate-in fade-in duration-500">
+          <div className="p-10 flex justify-between items-center text-white absolute top-0 w-full z-10">
+            <div className="flex items-center gap-4 bg-black/50 px-6 py-3 rounded-full backdrop-blur-xl border border-white/20 shadow-2xl">
+               <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse shadow-[0_0_12px_rgba(239,68,68,1)]"></div>
+               <span className="font-black text-[11px] tracking-widest uppercase italic">Gemini Vision 3.0</span>
             </div>
-            <button onClick={closeCamera} className="bg-white/10 p-4 rounded-full backdrop-blur-xl active:scale-90 border border-white/20"><X className="w-7 h-7" /></button>
+            <button onClick={closeCamera} className="bg-white/10 p-5 rounded-full backdrop-blur-xl active:scale-90 border border-white/20"><X className="w-8 h-8" /></button>
           </div>
           <video ref={videoRef} autoPlay playsInline className="w-full h-full object-cover" />
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none p-8">
-            <div className="w-full aspect-[16/10] border-4 border-blue-400/60 rounded-[3.5rem] animate-pulse shadow-[0_0_150px_rgba(59,130,246,0.3)] relative">
-               <div className="absolute -top-1 -left-1 w-12 h-12 border-t-4 border-l-4 border-blue-400 rounded-tl-3xl"></div>
-               <div className="absolute -top-1 -right-1 w-12 h-12 border-t-4 border-r-4 border-blue-400 rounded-tr-3xl"></div>
-               <div className="absolute -bottom-1 -left-1 w-12 h-12 border-b-4 border-l-4 border-blue-400 rounded-bl-3xl"></div>
-               <div className="absolute -bottom-1 -right-1 w-12 h-12 border-b-4 border-r-4 border-blue-400 rounded-br-3xl"></div>
-               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-white/20 uppercase text-[10px] font-black tracking-[0.5em]">Scan Model Name</div>
+          
+          <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none p-8">
+            <div className="w-full aspect-[16/10] border-[5px] border-blue-400/80 rounded-[4rem] animate-pulse shadow-[0_0_200px_rgba(59,130,246,0.5)] relative">
+               <div className="absolute -top-1 -left-1 w-16 h-16 border-t-[6px] border-l-[6px] border-blue-500 rounded-tl-[3.5rem]"></div>
+               <div className="absolute -top-1 -right-1 w-16 h-16 border-t-[6px] border-r-[6px] border-blue-500 rounded-tr-[3.5rem]"></div>
+               <div className="absolute -bottom-1 -left-1 w-16 h-16 border-b-[6px] border-l-[6px] border-blue-500 rounded-bl-[3.5rem]"></div>
+               <div className="absolute -bottom-1 -right-1 w-16 h-16 border-b-[6px] border-r-[6px] border-blue-500 rounded-br-[3.5rem]"></div>
+               <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-white/40 uppercase text-[12px] font-black tracking-[0.6em] whitespace-nowrap">Focus on Model Name</div>
             </div>
           </div>
-          <div className="absolute bottom-16 w-full flex justify-center">
-            <button onClick={captureImage} className="w-32 h-32 rounded-full border-[10px] border-white/30 bg-white/10 active:scale-90 transition-all flex items-center justify-center backdrop-blur-sm">
-               <div className="w-24 h-24 bg-white rounded-full shadow-2xl flex items-center justify-center"><Camera className="w-12 h-12 text-slate-900" /></div>
+          
+          <div className="absolute bottom-20 w-full flex justify-center">
+            <button onClick={captureImage} className="w-36 h-36 rounded-full border-[12px] border-white/20 bg-white/10 active:scale-90 transition-all flex items-center justify-center backdrop-blur-md shadow-2xl">
+               <div className="w-24 h-24 bg-white rounded-full shadow-[inset_0_4px_10px_rgba(0,0,0,0.2)] flex items-center justify-center border-4 border-slate-100">
+                  <Camera className="w-12 h-12 text-slate-900" />
+               </div>
             </button>
           </div>
         </div>
       )}
 
+      {/* Hidden inputs */}
       <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={(e) => {
         const file = e.target.files?.[0];
         if (file) {
