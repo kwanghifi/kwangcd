@@ -7,7 +7,6 @@ export async function identifyModelFromImage(base64Image: string): Promise<strin
   
   try {
     const ai = new GoogleGenAI({ apiKey });
-    // ตรวจสอบและสกัดเอาเฉพาะข้อมูล base64 ที่แท้จริง
     const base64Data = base64Image.includes(',') ? base64Image.split(',')[1] : base64Image;
     const mimeType = base64Image.includes('image/png') ? 'image/png' : 'image/jpeg';
 
@@ -22,14 +21,14 @@ export async function identifyModelFromImage(base64Image: string): Promise<strin
             },
           },
           {
-            text: "You are an expert in vintage audio equipment. Identify the CD PLAYER brand and model number from this image. Return ONLY the model name as a short string (e.g., 'Sony CDP-227ESD'). Do not include any sentences or extra text. If you are not sure, return 'NOT_FOUND'.",
+            text: "Look at the audio equipment in this image. Focus on the manufacturer logo and the model name/number (usually on the front panel). Return ONLY the Brand and Model Name (e.g., 'TEAC VRDS-25' or 'Marantz CD-63'). If there are multiple devices, identify the main CD Player. Do not include any descriptions, just the name. If unknown, return 'NOT_FOUND'.",
           },
         ],
       },
     });
     
-    const result = response.text?.trim().replace(/^"(.*)"$/, '$1'); // ลบอัญประกาศถ้ามี
-    return (!result || result.includes('NOT_FOUND')) ? null : result;
+    const result = response.text?.trim().replace(/[*"']/g, ''); 
+    return (!result || result.includes('NOT_FOUND') || result.length < 3) ? null : result;
   } catch (error) {
     console.error("Gemini Vision Error:", error);
     return null;
@@ -44,9 +43,9 @@ export async function fetchSpecsWithAI(modelName: string): Promise<{ dac: string
     const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: `Find the technical specifications for the CD Player model: "${modelName}". I need the DAC (Digital-to-Analog Converter) chip name and the Laser Pickup (Optical assembly) model. 
-      Return the result in JSON format with keys "dac" and "laser". 
-      Example: {"dac": "2 x PCM56P-J & YM3414", "laser": "KSS-151A"}`,
+      contents: `Search technical specifications for: "${modelName}". I need the DAC chip and the Laser Pickup model. 
+      Return ONLY valid JSON with keys "dac" and "laser". 
+      Example: {"dac": "TDA1541A", "laser": "CDM-4/19"}`,
       config: {
         responseMimeType: "application/json",
         responseSchema: {
