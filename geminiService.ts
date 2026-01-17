@@ -21,14 +21,17 @@ export async function identifyModelFromImage(base64Image: string): Promise<strin
             },
           },
           {
-            text: "Look at the audio equipment in this image. Focus on the manufacturer logo and the model name/number (usually on the front panel). Return ONLY the Brand and Model Name (e.g., 'TEAC VRDS-25' or 'Marantz CD-63'). If there are multiple devices, identify the main CD Player. Do not include any descriptions, just the name. If unknown, return 'NOT_FOUND'.",
+            text: "Identify the CD player model from this image. Look closely at the manufacturer logo (like Sony, Marantz, Denon) and the model code (usually near the display or tray). Return ONLY the brand and model number as a simple string, for example: 'Marantz CD-63'. If you can't see a model clearly, try to guess the most likely one based on visual cues. If completely unknown, return 'UNKNOWN'.",
           },
         ],
       },
     });
     
     const result = response.text?.trim().replace(/[*"']/g, ''); 
-    return (!result || result.includes('NOT_FOUND') || result.length < 3) ? null : result;
+    if (!result || result.toUpperCase().includes('UNKNOWN') || result.length < 3) {
+      return null;
+    }
+    return result;
   } catch (error) {
     console.error("Gemini Vision Error:", error);
     return null;
@@ -43,7 +46,7 @@ export async function fetchSpecsWithAI(modelName: string): Promise<{ dac: string
     const ai = new GoogleGenAI({ apiKey });
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
-      contents: `Search technical specifications for: "${modelName}". I need the DAC chip and the Laser Pickup model. 
+      contents: `Search technical specifications for: "${modelName}" Hi-Fi CD Player. I need the DAC chip model and the Laser Pickup / Optical block model. 
       Return ONLY valid JSON with keys "dac" and "laser". 
       Example: {"dac": "TDA1541A", "laser": "CDM-4/19"}`,
       config: {
